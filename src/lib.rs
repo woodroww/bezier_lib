@@ -29,6 +29,19 @@ pub enum BezierShapeType {
     BezierLine,
 }
 
+impl std::fmt::Display for BezierShapeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BezierShapeType::Start => write!(f, "Start"),
+            BezierShapeType::ControlStart => write!(f, "ControlStart"),
+            BezierShapeType::ControlEnd => write!(f, "ControlEnd"),
+            BezierShapeType::End => write!(f, "End"),
+            BezierShapeType::Line => write!(f, "Line"),
+            BezierShapeType::BezierLine => write!(f, "BezierLine"),
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct BezierDrag {
     pub bezier_id: usize,
@@ -42,6 +55,15 @@ pub struct BezierDrag {
 }
 
 impl BezierDrag {
+    pub fn clear_drag(&mut self) {
+        self.bezier_id = 0;
+        self.entity = None;
+        self.start_click = None;
+        self.a = None;
+        self.b = None;
+        self.c = None;
+        self.d = None;
+    }
     pub fn add_delta(&mut self, delta: Vec2) {
         match self.dragging {
             BezierShapeType::Start => {
@@ -83,6 +105,17 @@ pub enum ShapeType {
     Bezier(BezierShape),
 }
 
+impl std::fmt::Display for ShapeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShapeType::Intersection => write!(f, "Intersection"),
+            ShapeType::Main => write!(f, "Main"),
+            ShapeType::Sketch => write!(f, "Sketch"),
+            ShapeType::Bezier(_bezier_shape) => write!(f, "Bezier"),
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct BezierStyle {
     pub intersection_color: Color,
@@ -98,7 +131,7 @@ impl Default for BezierStyle {
         Self {
             intersection_color: Color::srgba(1.0, 0.0, 0.0, 1.0),
             sketch_color: Color::srgba(0.5, 0.5, 0.5, 1.0),
-            intersection_radius: 4.0,
+            intersection_radius: 6.0,
             bezier_stroke_width: 4.0,
             sketch_stroke_width: 1.0,
             bezier_line_color: Color::srgba_u8(200, 172, 110, 255),
@@ -123,7 +156,7 @@ pub fn bezier_open(
     c: Vec2,
     d: Vec2,
 ) -> Vec<(Shape, ShapeType)> {
-    let radius = style.intersection_radius;
+    let radius = style.intersection_radius - 1.0;
     let stroke = style.sketch_stroke_width;
     let thick_stroke_width = style.bezier_stroke_width;
     let i_color = style.intersection_color;
@@ -133,35 +166,13 @@ pub fn bezier_open(
 
     shapes.push((
         ShapeBuilder::new()
-            .add(&shapes::Line(a, b))
-            .stroke((color, stroke))
+            .add(&shapes::Circle { radius, center: a })
+            .fill(i_color)
             .build(),
         ShapeType::Bezier(BezierShape {
-            shape_type: BezierShapeType::Line,
+            shape_type: BezierShapeType::Start,
             id,
-            point: None,
-        }),
-    ));
-    shapes.push((
-        ShapeBuilder::new()
-            .add(&shapes::Line(b, c))
-            .stroke((color, stroke))
-            .build(),
-        ShapeType::Bezier(BezierShape {
-            shape_type: BezierShapeType::Line,
-            id,
-            point: None,
-        }),
-    ));
-    shapes.push((
-        ShapeBuilder::new()
-            .add(&shapes::Line(c, d))
-            .stroke((color, stroke))
-            .build(),
-        ShapeType::Bezier(BezierShape {
-            shape_type: BezierShapeType::Line,
-            id,
-            point: None,
+            point: Some(a),
         }),
     ));
 
@@ -179,20 +190,18 @@ pub fn bezier_open(
 
     shapes.push((
         ShapeBuilder::new()
-            .add(&shapes::Circle { radius, center: a })
-            .stroke((i_color, stroke))
-            .fill(i_color)
+            .add(&shapes::Line(a, b))
+            .stroke((color, stroke))
             .build(),
         ShapeType::Bezier(BezierShape {
-            shape_type: BezierShapeType::Start,
+            shape_type: BezierShapeType::Line,
             id,
-            point: Some(a),
+            point: None,
         }),
     ));
     shapes.push((
         ShapeBuilder::new()
             .add(&shapes::Circle { radius, center: b })
-            .stroke((i_color, stroke))
             .fill(i_color)
             .build(),
         ShapeType::Bezier(BezierShape {
@@ -203,8 +212,18 @@ pub fn bezier_open(
     ));
     shapes.push((
         ShapeBuilder::new()
+            .add(&shapes::Line(b, c))
+            .stroke((color, stroke))
+            .build(),
+        ShapeType::Bezier(BezierShape {
+            shape_type: BezierShapeType::Line,
+            id,
+            point: None,
+        }),
+    ));
+    shapes.push((
+        ShapeBuilder::new()
             .add(&shapes::Circle { radius, center: c })
-            .stroke((i_color, stroke))
             .fill(i_color)
             .build(),
         ShapeType::Bezier(BezierShape {
@@ -213,10 +232,22 @@ pub fn bezier_open(
             point: Some(c),
         }),
     ));
+
+    shapes.push((
+        ShapeBuilder::new()
+            .add(&shapes::Line(c, d))
+            .stroke((color, stroke))
+            .build(),
+        ShapeType::Bezier(BezierShape {
+            shape_type: BezierShapeType::Line,
+            id,
+            point: None,
+        }),
+    ));
+
     shapes.push((
         ShapeBuilder::new()
             .add(&shapes::Circle { radius, center: d })
-            .stroke((i_color, stroke))
             .fill(i_color)
             .build(),
         ShapeType::Bezier(BezierShape {
@@ -229,25 +260,16 @@ pub fn bezier_open(
     shapes
 }
 
-pub fn drag_end(
-    _click: Trigger<Pointer<DragEnd>>,
-    _query: Query<(Entity, &mut Shape, &ShapeType, &Transform)>,
-    mut commands: Commands,
-    mut drag: ResMut<BezierDrag>,
-) {
-    commands.entity(drag.entity.unwrap()).despawn();
-    drag.entity = None;
-}
-
 pub fn drag_start(
     click: Trigger<Pointer<DragStart>>,
-    query: Query<(Entity, &mut Shape, &ShapeType, &Transform)>,
+    query: Query<(Entity, &mut Shape, &ShapeType)>,
     mut commands: Commands,
     mut drag: ResMut<BezierDrag>,
 ) {
-    let Ok((drag_entity, _shape, drag_shape_type, _transform)) = query.get(click.target) else {
+    let Ok((drag_entity, _shape, drag_shape_type)) = query.get(click.target) else {
         return;
     };
+
     commands.entity(drag_entity).insert(Visibility::Hidden);
     let (bezier_id, part_drag) = if let ShapeType::Bezier(bezier_shape) = drag_shape_type {
         (bezier_shape.id, bezier_shape.shape_type.clone())
@@ -255,12 +277,13 @@ pub fn drag_start(
         return;
     };
 
+    drag.bezier_id = bezier_id;
     drag.entity = Some(drag_entity);
     drag.start_click = Some(click.event().pointer_location.position);
     drag.dragging = part_drag;
 
     // find the bezier points with id
-    for (_entity, _shape, shape_type, _transform) in query.iter() {
+    for (_entity, _shape, shape_type) in query.iter() {
         if let ShapeType::Bezier(bezier_shape) = shape_type {
             if bezier_id == bezier_shape.id {
                 match bezier_shape.shape_type {
@@ -286,19 +309,23 @@ pub fn drag_start(
             }
         }
     }
+    assert!(drag.a.is_some());
+    assert!(drag.b.is_some());
+    assert!(drag.c.is_some());
+    assert!(drag.d.is_some());
 }
 
 pub fn bezier_drag(
     click: Trigger<Pointer<Drag>>,
     mut commands: Commands,
-    query: Query<(Entity, &mut Shape, &ShapeType, &Transform)>,
+    query: Query<(Entity, &mut Shape, &ShapeType)>,
     mut drag: ResMut<BezierDrag>,
     style: Res<BezierStyle>,
 ) {
-    let Ok((drag_entity, _shape, _drag_shape_type, _transform)) = query.get(click.target) else {
+    let Ok((drag_entity, _shape, _drag_shape_type)) = query.get(click.target) else {
         return;
     };
-    for (entity, _, shape_type, _) in query.iter() {
+    for (entity, _, shape_type) in query.iter() {
         if let ShapeType::Bezier(bezier) = shape_type {
             if bezier.id == drag.bezier_id && drag_entity != entity {
                 commands.entity(entity).despawn();
@@ -327,3 +354,14 @@ pub fn bezier_drag(
             .observe(drag_end);
     }
 }
+
+pub fn drag_end(
+    _click: Trigger<Pointer<DragEnd>>,
+    _query: Query<(Entity, &mut Shape, &ShapeType, &Transform)>,
+    mut commands: Commands,
+    mut drag: ResMut<BezierDrag>,
+) {
+    commands.entity(drag.entity.unwrap()).despawn();
+    drag.clear_drag();
+}
+
